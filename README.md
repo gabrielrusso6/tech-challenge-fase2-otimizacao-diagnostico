@@ -85,11 +85,20 @@ python main_phase2.py
 pytest
 ```
 
-### 5. Executar com Docker
+### 5. Execução com Docker e Ollama
+
+Para executar o projeto completo em Docker usando o Ollama rodando no host Mac:
 
 ```bash
 docker build -t tech-challenge-fase2 .
-docker run --rm tech-challenge-fase2
+
+docker run --rm \
+  -e OLLAMA_MODEL=llama3.2:1b \
+  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  -v "$PWD/reports:/app/reports" \
+  -v "$PWD/models:/app/models" \
+  -v "$PWD/logs:/app/logs" \
+  tech-challenge-fase2
 ```
 
 ## Algoritmo genético

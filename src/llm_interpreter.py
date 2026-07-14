@@ -8,9 +8,9 @@ import requests
 class DiagnosisLLMInterpreter:
     """Integração com LLM para interpretação de diagnósticos.
 
-    A integração suporta Ollama local via HTTP. Caso o Ollama não esteja ativo,
-    o sistema gera uma explicação estruturada de fallback para manter a demonstração
-    funcionando em ambiente acadêmico.
+    A integração suporta Ollama local via HTTP. Caso o Ollama não esteja ativo
+    ou gere uma resposta incoerente com as regras de segurança, o sistema usa
+    uma explicação controlada para manter a demonstração responsável.
     """
 
     def __init__(self, model_name: Optional[str] = None, base_url: Optional[str] = None):
@@ -34,13 +34,16 @@ REGRAS OBRIGATÓRIAS:
 - Use somente os dados fornecidos neste prompt.
 - Não invente quantidade de amostras, fonte de dados, PVP, sensibilidade, especificidade ou qualquer métrica não informada.
 - Não afirme diagnóstico definitivo.
-- Não diga que o modelo foi treinado com mais de 10.000 casos.
+- Não recomende tratamento.
 - A classe predita pelo modelo foi: {prediction_label}.
 - A probabilidade estimada de malignidade foi: {malignant_probability_percent:.2f}%.
-- Se a classe predita for Benigno, explique que o modelo indicou baixa probabilidade de malignidade.
-- Se a classe predita for Maligno, explique que o modelo indicou alta probabilidade de malignidade.
+- Essa probabilidade deve ser interpretada como BAIXA quando for menor que 1%.
+- Se a classe predita for Benigno e a probabilidade de malignidade for baixa, explique que o modelo indicou baixa probabilidade de malignidade.
+- Se a classe predita for Benigno e a probabilidade de malignidade for baixa, NÃO diga que o caso é suspeito de malignidade.
+- Não use termos como "alta probabilidade", "probabilidade alta", "risco significativo", "risco considerável", "considerável", "suspeita de malignidade" ou "tratamento agressivo" quando a probabilidade for baixa.
 - Explique que o resultado é apoio à triagem e deve ser validado por profissional de saúde.
 - Destaque risco de falso negativo e necessidade de avaliação clínica.
+- Gere somente as 3 seções solicitadas. Não crie conclusão adicional.
 
 Dados do caso:
 - Classe predita pelo modelo: {prediction_label}
@@ -80,6 +83,59 @@ Gere exatamente 3 seções:
         payload = response.json()
         return payload.get("response", "").strip()
 
+    def _response_violates_low_risk_rule(
+        self,
+        response_text: str,
+        prediction_label: str,
+        malignant_probability: float,
+    ) -> bool:
+        is_benign = prediction_label.strip().lower().startswith("benigno")
+        is_low_probability = malignant_probability < 0.01
+
+        if not (is_benign and is_low_probability):
+            return False
+
+        unsafe_terms = [
+            "alta probabilidade",
+            "probabilidade alta",
+            "risco significativo",
+            "risco considerável",
+            "considerável",
+            "suspeita de malignidade",
+            "suspeito de malignidade",
+            "tratamento agressivo",
+            "alta chance",
+            "chance alta",
+        ]
+
+        normalized = response_text.lower()
+        return any(term in normalized for term in unsafe_terms)
+
+    def generate_controlled_explanation(
+        self,
+        prediction_label: str,
+        malignant_probability: float,
+        model_metrics: Dict[str, float],
+        top_features: List[str],
+    ) -> str:
+        malignant_probability_percent = malignant_probability * 100
+
+        return f"""
+1. Explicação do resultado
+
+O modelo classificou o caso analisado como {prediction_label}, com probabilidade estimada de malignidade de {malignant_probability_percent:.2f}%. Para este exemplo específico, essa probabilidade é baixa. O resultado deve ser interpretado como apoio à triagem e não como diagnóstico definitivo.
+
+2. Pontos de atenção
+
+Mesmo com métricas elevadas, o modelo pode cometer falsos positivos e falsos negativos. Por isso, o resultado precisa ser analisado junto com histórico clínico, exames complementares e avaliação de profissionais de saúde. O recall de {model_metrics.get('recall', 0):.4f} indica boa capacidade de identificação de casos malignos no conjunto de teste, mas não elimina a necessidade de validação clínica.
+
+As principais variáveis consideradas no projeto incluem: {', '.join(top_features)}.
+
+3. Recomendação de uso responsável
+
+O modelo deve ser usado apenas como ferramenta acadêmica de apoio à decisão, auxiliando na priorização e interpretação inicial dos casos. A decisão clínica final deve sempre ser realizada por profissionais de saúde, considerando o contexto completo do paciente.
+""".strip()
+
     def generate_fallback_explanation(
         self,
         prediction_label: str,
@@ -87,18 +143,12 @@ Gere exatamente 3 seções:
         model_metrics: Dict[str, float],
         top_features: List[str],
     ) -> str:
-        return f"""
-Explicação gerada em modo demonstração, sem chamada externa para LLM.
-
-O modelo classificou o caso como {prediction_label}, com probabilidade estimada de malignidade de {malignant_probability:.2%}.
-Essa saída deve ser entendida como apoio à triagem, não como diagnóstico definitivo. Em contexto médico, o recall de {model_metrics.get('recall', 0):.4f} é uma métrica especialmente importante, pois indica a capacidade do modelo de identificar corretamente casos malignos.
-
-As variáveis mais relevantes observadas no projeto incluem: {', '.join(top_features)}. Esses atributos estão relacionados a características morfológicas do tumor e ajudam o modelo a separar padrões associados a casos benignos e malignos.
-
-Pontos de atenção: resultados preditivos precisam ser analisados junto com histórico clínico, exames complementares e avaliação de profissionais de saúde. Mesmo com boa performance estatística, podem existir falsos positivos e falsos negativos.
-
-Recomendação: usar o modelo apenas como ferramenta educacional de apoio à decisão e priorização de análise, sempre com validação médica especializada.
-""".strip()
+        return self.generate_controlled_explanation(
+            prediction_label,
+            malignant_probability,
+            model_metrics,
+            top_features,
+        )
 
     def explain_result(
         self,
@@ -117,16 +167,37 @@ Recomendação: usar o modelo apenas como ferramenta educacional de apoio à dec
 
         if use_llm:
             try:
-                return self.generate_with_ollama(prompt)
-            except Exception as exc:
-                return self.generate_fallback_explanation(
+                llm_response = self.generate_with_ollama(prompt)
+
+                if self._response_violates_low_risk_rule(
+                    llm_response,
                     prediction_label,
                     malignant_probability,
-                    model_metrics,
-                    top_features,
-                ) + f"\n\nObservação técnica: a chamada ao Ollama não foi concluída ({exc})."
+                ):
+                    return (
+                        self.generate_controlled_explanation(
+                            prediction_label,
+                            malignant_probability,
+                            model_metrics,
+                            top_features,
+                        )
+                        + "\n\nObservação de segurança: a resposta original da LLM foi descartada por contrariar as regras de interpretação para baixa probabilidade de malignidade."
+                    )
 
-        return self.generate_fallback_explanation(
+                return llm_response
+
+            except Exception as exc:
+                return (
+                    self.generate_controlled_explanation(
+                        prediction_label,
+                        malignant_probability,
+                        model_metrics,
+                        top_features,
+                    )
+                    + f"\n\nObservação técnica: a chamada ao Ollama não foi concluída ({exc})."
+                )
+
+        return self.generate_controlled_explanation(
             prediction_label,
             malignant_probability,
             model_metrics,

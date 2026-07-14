@@ -1,9 +1,7 @@
-cat > .gitignore <<'EOF'
 # Python
 __pycache__/
 *.py[cod]
 *.pyo
-*.pyd
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -35,4 +33,3 @@ models/*.joblib
 tmp/
 temp/
 *.zip
-EOF
