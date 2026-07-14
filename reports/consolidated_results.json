@@ -1,0 +1,56 @@
+{
+  "project": "Tech Challenge Fase 2 - Projeto 1",
+  "best_ga_config": {
+    "population_size": 10,
+    "generations": 5,
+    "crossover_rate": 0.9,
+    "mutation_rate": 0.3,
+    "tournament_size": 3,
+    "cv_folds": 5,
+    "random_state": 44
+  },
+  "best_ga_individual": {
+    "C": 0.3,
+    "penalty": "l2",
+    "class_weight": null,
+    "fit_intercept": false,
+    "intercept_scaling": 0.5
+  },
+  "best_ga_cv_metrics": {
+    "accuracy": 0.9824175824175825,
+    "precision": 0.9882352941176471,
+    "recall": 0.9647058823529413,
+    "f1_score": 0.9760194502600121,
+    "auc_roc": 0.9961816305469556
+  },
+  "optimized_test_metrics": {
+    "model": "LogisticRegression_GA_optimized",
+    "accuracy": 0.9912280701754386,
+    "precision": 1.0,
+    "recall": 0.9761904761904762,
+    "f1_score": 0.9879518072289156,
+    "auc_roc": 0.998015873015873
+  },
+  "optimized_confusion_matrix": [
+    [
+      72,
+      0
+    ],
+    [
+      1,
+      41
+    ]
+  ],
+  "top_features": [
+    "texture_worst",
+    "radius_se",
+    "area_worst",
+    "area_se",
+    "radius_worst",
+    "symmetry_worst",
+    "concave points_mean",
+    "perimeter_worst",
+    "perimeter_se",
+    "concavity_mean"
+  ]
+}
